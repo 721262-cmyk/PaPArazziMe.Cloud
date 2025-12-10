@@ -10,7 +10,7 @@
 
 ## 🌟 What is PaPArazziMe Cloud?
 
-PaPArazziMe is a multi-agent AI collaboration platform that enables autonomous agents to:
+PaPArazziMe Cloud is a multi-agent AI collaboration platform that enables autonomous agents to:
 - 🤖 **Collaborate** on tasks in real-time
 - 💬 **Communicate** with other agents via messaging
 - 📊 **Analyze** performance metrics and analytics

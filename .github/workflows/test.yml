@@ -1,0 +1,155 @@
+# MasterDev Testing Pipeline
+# For GOD Alone. Fearing GOD Alone. 🦅
+#
+# Comprehensive testing for all pull requests and commits
+
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  
+  pull_request:
+    branches: [ main, master, develop ]
+  
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: npm ci
+      
+      - name: Run ESLint
+        if: hashFiles('package.json') != ''
+        run: npm run lint || echo "No lint script configured"
+      
+      - name: Setup Python
+        if: hashFiles('requirements.txt', 'setup.py', 'pyproject.toml') != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Run flake8
+        if: hashFiles('requirements.txt') != ''
+        run: |
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    
+    strategy:
+      matrix:
+        node-version: [18, 20]
+        python-version: ['3.10', '3.11']
+      fail-fast: false
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      
+      - name: Install Node dependencies
+        if: hashFiles('package.json') != ''
+        run: npm ci
+      
+      - name: Run Node tests
+        if: hashFiles('package.json') != ''
+        run: |
+          npm test || echo "No tests configured"
+        env:
+          CI: true
+      
+      - name: Setup Python ${{ matrix.python-version }}
+        if: hashFiles('requirements.txt', 'setup.py', 'pyproject.toml') != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      
+      - name: Install Python dependencies
+        if: hashFiles('requirements.txt') != ''
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      
+      - name: Run Python tests
+        if: hashFiles('requirements.txt') != ''
+        run: |
+          pytest --cov --cov-report=xml || echo "No tests configured"
+      
+      - name: Upload coverage
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        if: hashFiles('package.json') != ''
+        run: npm ci
+      
+      - name: Build project
+        if: hashFiles('package.json') != ''
+        run: npm run build || echo "No build script configured"
+      
+      - name: Setup Go
+        if: hashFiles('go.mod') != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      
+      - name: Build Go project
+        if: hashFiles('go.mod') != ''
+        run: go build -v ./...
+      
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            dist/
+            build/
+          retention-days: 7

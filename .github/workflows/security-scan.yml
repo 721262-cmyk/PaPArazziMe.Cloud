@@ -1,0 +1,150 @@
+# MasterDev Security Scanning
+# For GOD Alone. Fearing GOD Alone. 🦅
+#
+# Continuous security vulnerability scanning
+
+name: Security Scan
+
+on:
+  schedule:
+    # Run every 4 hours
+    - cron: '0 */4 * * *'
+  
+  push:
+    branches: [ main, master, develop ]
+  
+  pull_request:
+    branches: [ main, master, develop ]
+  
+  workflow_dispatch:
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      security-events: write
+      issues: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Setup Python
+        if: hashFiles('requirements.txt', 'setup.py', 'pyproject.toml') != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          if [ -f "package.json" ]; then
+            npm ci
+          fi
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
+      
+      - name: Run npm audit
+        if: hashFiles('package.json') != ''
+        run: |
+          echo "🔍 Running npm security audit..."
+          npm audit --audit-level=moderate --json > npm-audit.json || true
+          npm audit --audit-level=moderate || true
+      
+      - name: Run pip-audit
+        if: hashFiles('requirements.txt') != ''
+        run: |
+          echo "🔍 Running pip security audit..."
+          pip install pip-audit
+          pip-audit --format json > pip-audit.json || true
+          pip-audit || true
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Check for vulnerabilities
+        id: vuln-check
+        run: |
+          VULN_COUNT=0
+          
+          if [ -f "npm-audit.json" ]; then
+            NPM_VULNS=$(jq '.metadata.vulnerabilities.total // 0' npm-audit.json)
+            VULN_COUNT=$((VULN_COUNT + NPM_VULNS))
+          fi
+          
+          if [ -f "pip-audit.json" ]; then
+            PIP_VULNS=$(jq 'length' pip-audit.json 2>/dev/null || echo 0)
+            VULN_COUNT=$((VULN_COUNT + PIP_VULNS))
+          fi
+          
+          echo "total_vulns=$VULN_COUNT" >> $GITHUB_OUTPUT
+          
+          if [ $VULN_COUNT -gt 0 ]; then
+            echo "⚠️ Found $VULN_COUNT vulnerabilities"
+            exit 1
+          else
+            echo "✅ No vulnerabilities found"
+          fi
+      
+      - name: Create security issue
+        if: failure() && steps.vuln-check.outputs.total_vulns > 0
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const vulnCount = '${{ steps.vuln-check.outputs.total_vulns }}';
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Security Alert: ${vulnCount} vulnerabilities detected`,
+              body: `## Security Vulnerabilities Detected
+              
+              **Total Vulnerabilities:** ${vulnCount}
+              **Scan Date:** ${new Date().toISOString()}
+              **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              
+              ### Action Required
+              1. Review the security scan results
+              2. Update affected dependencies
+              3. Run tests to verify fixes
+              4. Deploy updated code
+              
+              ### Resources
+              - [npm audit results](npm-audit.json)
+              - [Trivy scan results](trivy-results.sarif)
+              
+              ---
+              *Automated by MasterDev Security Scanning*  
+              *For GOD Alone. Fearing GOD Alone. 🦅*`,
+              labels: ['security', 'automated', 'urgent']
+            });
+      
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: |
+            npm-audit.json
+            pip-audit.json
+            trivy-results.sarif
+          retention-days: 30

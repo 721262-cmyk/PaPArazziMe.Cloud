@@ -107,7 +107,7 @@ jobs:
       
       - name: Create security issue
         if: failure() && steps.vuln-check.outputs.total_vulns > 0
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const vulnCount = '${{ steps.vuln-check.outputs.total_vulns }}';
